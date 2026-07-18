@@ -10,11 +10,21 @@ import urllib.request
 import zipfile
 import os
 import sys
+import ssl
+import certifi
 from pathlib import Path
 from tkinter import LEFT, RIGHT, StringVar, Tk, filedialog, messagebox
 from tkinter import ttk
 import tkinter as tk
 
+def setup_ssl():
+    """Naprawia problem z certyfikatami SSL w zamrożonym exe"""
+    if getattr(sys, 'frozen', False):
+        # Wymuszamy certyfikaty z certifi
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()  # na wszelki wypadek
+
+setup_ssl()  # <- Wywołanie na samym początku!
 
 def get_app_path() -> Path:
     """Zwraca folder, w którym znajduje się plik .exe (działa zarówno w .py jak i w PyInstaller)"""
@@ -55,25 +65,28 @@ def to_windows_path(value):
 
 def fetch_github_json(url):
     try:
-        with urllib.request.urlopen(
-            urllib.request.Request(url, headers=HEADERS),
-            timeout=25
-        ) as response:
+        context = ssl.create_default_context(cafile=certifi.where())
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=25, context=context) as response:
             return json.load(response)
 
     except urllib.error.HTTPError as e:
         if e.code == 403:
-            raise RuntimeError(
-                "Tools are ready."
-            )
+            raise RuntimeError("Tools are ready.")
         raise
+    except Exception as e:
+        raise RuntimeError(f"Network error: {e}") from e
 
 
 def download_file(url, path, report):
-    with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=90) as response, open(path, "wb") as target:
+    context = ssl.create_default_context(cafile=certifi.where())
+    req = urllib.request.Request(url, headers=HEADERS)
+    
+    with urllib.request.urlopen(req, timeout=90, context=context) as response, open(path, "wb") as target:
         total, received = int(response.headers.get("Content-Length", 0)), 0
         while block := response.read(1024 * 512):
-            target.write(block); received += len(block)
+            target.write(block)
+            received += len(block)
             if total:
                 report(f"Downloading tool: {received * 100 // total}%")
 
